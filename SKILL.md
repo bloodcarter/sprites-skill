@@ -58,6 +58,14 @@ sprite url update --auth public && sprite url
 ```
 Also: `console` (shell), `proxy 8080` (port-forward), `checkpoint create|restore`, `restore`, `list`, `destroy`, `upgrade`. Install per `docs.sprites.dev/cli/installation`.
 
+## Running a real web service — gotchas that WILL bite (verified deploying a torch app)
+
+- **Services run as a DIFFERENT user than `sprite exec`.** `exec` is user `sprite` (`$HOME=/home/sprite`); a service's `python3` doesn't see `~/.local`. So `pip3 install <pkg>` (which lands in `/home/sprite/.local/...`) imports fine under `exec` but the service dies with `ModuleNotFoundError`. Fix: run the service with `cmd:bash, args:["-c","PYTHONPATH=/home/sprite/.local/lib/pythonX.Y/site-packages exec python3 /app/app.py"]`, or install to the system site.
+- **The pyenv python may lack stdlib C-extensions** (`_bz2`, `_lzma`, …) — built without them. Libraries that import them (e.g. `pooch`, pulled by `librosa.resample`) crash at runtime with `No module named '_lzma'`. Avoid that code path (e.g. resample with `numpy`/`scipy` instead of `librosa`) or use `/usr/bin/python3` (has them, but different version → reinstall deps).
+- **`service_start` on an already-running service MONITORS, it doesn't reload.** After changing a file, `service_stop` then `service_start` (or `DELETE` then re-create) — otherwise the old process keeps serving the old code.
+- **`| tail` hides pip failures.** A masked failed install still lets an unrelated `import` succeed → confusing later `ModuleNotFoundError`. Verify with an explicit `python3 -c 'import a,b,c; print("OK")'` after install.
+- **This CLI build may lack `services`/`console`.** Check `sprite --help`; if absent, manage services via the API (`POST /v1/sprites/{s}/services`) or MCP `service_create`. `sprite api /v1/sprites/{s}/... -- <curl opts>` proxies raw API with your stored auth.
+
 ## MCP gotchas (when using a sprites MCP server)
 
 - **`exec` has no shell.** Its single `cmd` string is naively space-split into argv and quotes are kept literal, so `bash -c "…"` → `unexpected EOF`. The raw API avoids this because `cmd` is a repeated param. Over MCP, use a **space-free** program: `python3 -c exec(__import__('base64').b64decode(__import__('os').environ['B']))` with the real script in env `B` (bare `import x` also fails — use `__import__`).
